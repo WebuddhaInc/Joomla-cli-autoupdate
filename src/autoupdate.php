@@ -3,7 +3,7 @@
 /**
  * This is a CRON script which should be called from the command-line, not the
  * web. For example something like:
- * /usr/bin/php /path/to/site/cli/autoupdate_cron.php
+ * /usr/bin/php /path/to/site/cli/autoupdate.php
  */
 
 // Set flag that this is a parent file.
@@ -14,14 +14,18 @@
   ini_set('display_errors', 1);
   set_time_limit(0);
 
+// Define ase
+  if( !defined('JPATH_BASE') ){
+    define('JPATH_BASE', dirname(getcwd()));
+  }
+
 // Load system defines
-  if( file_exists(dirname(__DIR__) . '/defines.php') ){
-    require_once dirname(__DIR__) . '/defines.php';
+  if( file_exists(JPATH_BASE . '/defines.php') ){
+    require_once JPATH_BASE . '/defines.php';
   }
 
 // Load defaut defines
   if( !defined('_JDEFINES') ){
-    define('JPATH_BASE', dirname(__DIR__));
     require_once JPATH_BASE . '/includes/defines.php';
   }
 
@@ -43,10 +47,35 @@
   class AutoUpdateCron extends JApplicationCli {
 
     public function __construct(JInputCli $input = null, JRegistry $config = null, JDispatcher $dispatcher = null){
-      parent::__construct($input, $config, $dispatcher);
-      $this->db        = JFactory::getDBO();
-      $this->updater   = JUpdater::getInstance();
-      $this->installer = JComponentHelper::getComponent('com_installer');
+
+      // CLI Constructor
+        parent::__construct($input, $config, $dispatcher);
+
+      // Utilities
+        $this->db        = JFactory::getDBO();
+        $this->updater   = JUpdater::getInstance();
+        $this->installer = JComponentHelper::getComponent('com_installer');
+
+      // Validate Log Path
+        $logPath = $this->config->get('log_path');
+        if( !is_dir($logPath) || !is_writeable($logPath) ){
+          $logPath = JPATH_BASE . '/logs';
+          if( !is_dir($logPath) || !is_writeable($logPath) ){
+            $this->out('Log Path not found - ' . $logPath);
+          }
+          $this->config->set('log_path', JPATH_BASE . '/logs');
+        }
+
+      // Validate Tmp Path
+        $tmpPath = $this->config->get('tmp_path');
+        if( !is_writeable($tmpPath) ){
+          $tmpPath = JPATH_BASE . '/tmp';
+          if( !is_dir($tmpPath) || !is_writeable($tmpPath) ){
+            $this->out('Tmp Path not found - ' . $tmpPath);
+          }
+          $this->config->set('tmp_path', JPATH_BASE . '/tmp');
+        }
+
     }
 
     public function doFindUpdates(){
@@ -63,15 +92,27 @@
     }
 
     public function getNextUpdateId(){
+
+      $query = $this->db->getQuery(true)
+        ->select('update_id')
+        ->from('#__updates')
+        ->where($this->db->quoteName('extension_id') . ' != ' . $this->db->quote(0));
+
+      /**
+       * TODO
+       * Implement flags for limiting / expanding basic operation
+       */
+      /*
+      if( !$this->input->get('core') ){
+        ->where($this->db->quoteName('extension_id') . ' != ' . $this->db->quote(700));
+      }
+      */
+
       return
-        $this->db->setQuery(
-          $this->db->getQuery(true)
-            ->select('update_id')
-            ->from('#__updates')
-            ->where($this->db->quoteName('extension_id') . ' != ' . $this->db->quote(0))
-          , 0, 1
-          )
+        $this->db
+          ->setQuery($query, 0, 1)
           ->loadResult();
+
     }
 
     public function doInstallUpdate( $update_id ){
@@ -87,7 +128,7 @@
       // Download
         $tmpPath = $this->config->get('tmp_path');
         if( !is_writeable($tmpPath) ){
-          $tmpPath = preg_replace('/\w+$/','tmp',__DIR__);
+          $tmpPath = JPATH_BASE . '/tmp';
         }
         $url = $update->downloadurl->_data;
         if ($extra_query = $update->get('extra_query')){
