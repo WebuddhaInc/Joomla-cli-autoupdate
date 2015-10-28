@@ -76,6 +76,11 @@
           $this->config->set('tmp_path', JPATH_BASE . '/tmp');
         }
 
+      // Push to Global Config
+        $config = JFactory::getConfig();
+        $config->set('tmp_path', $this->config->get('tmp_path'));
+        $config->set('log_path', $this->config->get('log_path'));
+
     }
 
     public function doFindUpdates(){
