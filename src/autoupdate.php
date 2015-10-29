@@ -1,9 +1,28 @@
 <?php
 
 /**
- * This is a CRON script which should be called from the command-line, not the
- * web. For example something like:
+ * v0.0.2
+ *
+ * This is a CLI Script only
  * /usr/bin/php /path/to/site/cli/autoupdate.php
+ *
+ *  Operations
+ *  -f, --fetch             Run Fetch
+ *  -u, --update            Run Update
+ *  -l, --list              List Updates
+ *  -x, --export            Export Updates JSON
+ *
+ *  Update Filters
+ *  -i, --id ID             Update ID
+ *  -a, --all               All Packages
+ *  -V, --version VER       Version Filter
+ *  -c, --core              Joomla! Core Packages
+ *  -e, --extension LOOKUP  Extension by ID/NAME
+ *  -t, --type VAL          Type
+ *
+ *  Additional Flags
+ *  -v, --verbose           Verbose
+ *
  */
 
 // Set flag that this is a parent file.
@@ -83,7 +102,7 @@
 
     }
 
-    public function doFindUpdates(){
+    public function doFetchUpdates(){
 
       // Get the update cache time
         $cache_timeout = $this->installer->params->get('cachetimeout', 6, 'int');
@@ -96,37 +115,49 @@
 
     }
 
-    public function getNextUpdateId(){
+    public function getNextUpdateId( $lookup = null ){
+
+      $update_row = $this->getNextUpdateRow( $lookup );
+      return $update_row ? $update_row->id : null;
+
+    }
+
+    public function getNextUpdateRow( $lookup = null ){
 
       $query = $this->db->getQuery(true)
-        ->select('update_id')
+        ->select('*')
         ->from('#__updates')
         ->where($this->db->quoteName('extension_id') . ' != ' . $this->db->quote(0));
 
-      /**
-       * TODO
-       * Implement flags for limiting / expanding basic operation
-       */
-      /*
-      if( !$this->input->get('core') ){
-        ->where($this->db->quoteName('extension_id') . ' != ' . $this->db->quote(700));
+      $lookup = array();
+      if( is_numeric($lookup) ){
+        $lookup = array('extension_id' => $lookup);
       }
-      */
+      else if( is_string($lookup) ){
+        $lookup = array('element' => $lookup);
+      }
+      else if( is_array($lookup) ){
+        $lookup = (array)$lookup;
+      }
+
+      foreach( $lookup AS $key => $val ){
+        $query->where($this->db->quoteName( $key ) . ' = ' . $this->db->quote($val));
+      }
 
       return
         $this->db
           ->setQuery($query, 0, 1)
-          ->loadResult();
+          ->loadObject();
 
     }
 
-    public function doInstallUpdate( $update_id ){
+    public function doInstallUpdate( $update_row ){
 
       // Load
-        $this->out('Loading update #'. $update_id .'...');
+        $this->out('Loading update #'. $update_row->update_id .'...');
         $update = new JUpdate();
         $updateRow = JTable::getInstance('update');
-        $updateRow->load( $update_id );
+        $updateRow->load( $update_row->update_id );
         $update->loadFromXml($updateRow->detailsurl, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
         $update->set('extra_query', $updateRow->extra_query);
 
@@ -211,21 +242,108 @@
 
     public function doIterateUpdates(){
 
-      $this->out('Processing Updates...');
-      while( $update_id = $this->getNextUpdateId() ){
-        if( !$this->doInstallUpdate( $update_id ) ){
-          $this->out(' - Installation Failed - ABORT');
-          return false;
+      // Build Update Filter
+        $update_lookup = array();
+
+        if( $this->input->get('a', $this->input->get('all')) ){
         }
-      }
-      $this->out('Update processing complete');
+
+        if( $this->input->get('c', $this->input->get('core')) ){
+          $update_lookup[] = array(
+            'type'    => 'file',
+            'element' => 'joomla',
+            'version' => $this->input->get('v', $this->input->get('version'))
+            );
+        }
+
+        if( $extension_lookup = $this->input->get('e', $this->input->get('extension')) ){
+          if( is_string($extension_lookup) ){
+            $update_lookup[] = array(
+              'element' => $extension_lookup,
+              'type'    => $this->input->get('t', $this->input->get('type')),
+              'version' => $this->input->get('V', $this->input->get('version'))
+              );
+          }
+          else if( is_numeric($extension_lookup) ){
+            $update_lookup[] = array(
+              'extension_id' => $extension_lookup,
+              'type'         => $this->input->get('t', $this->input->get('type')),
+              'version'      => $this->input->get('V', $this->input->get('version'))
+              );
+          }
+        }
+
+      // List / Export / Process Updates
+        $update_id  = $this->input->get('i', $this->input->get('id'));
+        $update_row = null;
+        if( $update_id ){
+          $update_row = (object)array('update_id' => $update_id);
+        }
+        else {
+          $update_row = $this->getNextUpdateRow( array_shift($update_lookup) );
+        }
+        if( $update_row ){
+          $do_list   = $this->input->get('l', $this->input->get('list'));
+          $do_export = !$do_list && $this->input->get('x', $this->input->get('export'));
+          $do_update = !$do_list && !$do_export && $this->input->get('u', $this->input->get('update'));
+          if( $do_list ){
+            $this->out(implode('',array(
+              str_pad('update_id', 10, ' ', STR_PAD_RIGHT),
+              str_pad('extension_id', 15, ' ', STR_PAD_RIGHT),
+              str_pad('element', 30, ' ', STR_PAD_RIGHT),
+              str_pad('type', 15, ' ', STR_PAD_RIGHT),
+              str_pad('version', 10, ' ', STR_PAD_RIGHT)
+              )));
+          }
+          do {
+            if( $do_export ){
+              $this->out( json_encode($update_row) );
+            }
+            if( $do_list ){
+              $this->out(implode('',array(
+                str_pad($update_row->update_id, 10, ' ', STR_PAD_RIGHT),
+                str_pad($update_row->extension_id, 15, ' ', STR_PAD_RIGHT),
+                str_pad($update_row->element, 30, ' ', STR_PAD_RIGHT),
+                str_pad($update_row->type, 15, ' ', STR_PAD_RIGHT),
+                str_pad($update_row->version, 10, ' ', STR_PAD_RIGHT)
+                )));
+            }
+            if( $do_update ){
+              $this->out('Processing Update #' . $update_row->update_id .'...');
+              if( !$this->doInstallUpdate( $update_row ) ){
+                $this->out(' - Installation Failed - ABORT');
+                return false;
+              }
+            }
+          } while(
+            count($update_lookup)
+            && $update_row = $this->getNextUpdateRow(array_shift($update_lookup))
+            );
+          if( $do_update ){
+            $this->out('Update processing complete');
+          }
+        }
+        else {
+          $this->out('No updates found');
+        }
 
     }
 
     public function doExecute(){
 
-      $this->doFindUpdates();
-      $this->doIterateUpdates();
+      if( $this->input->get('f', $this->input->get('fetch')) ){
+        $this->doFetchUpdates();
+      }
+
+      if(
+        $this->input->get('l', $this->input->get('list'))
+        ||
+        $this->input->get('x', $this->input->get('export'))
+        ||
+        $this->input->get('u', $this->input->get('update'))
+        ){
+        $this->doIterateUpdates();
+      }
 
     }
 
