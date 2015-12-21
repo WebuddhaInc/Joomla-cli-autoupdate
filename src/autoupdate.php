@@ -1,32 +1,18 @@
 <?php
 
 /**
- * v0.0.2
  *
  * This is a CLI Script only
- * /usr/bin/php /path/to/site/cli/autoupdate.php
+ *   /usr/bin/php /path/to/site/cli/autoupdate.php
  *
- *  Operations
- *  -f, --fetch             Run Fetch
- *  -u, --update            Run Update
- *  -l, --list              List Updates
- *  -x, --export            Export Updates JSON
- *
- *  Update Filters
- *  -i, --id ID             Update ID
- *  -a, --all               All Packages
- *  -V, --version VER       Version Filter
- *  -c, --core              Joomla! Core Packages
- *  -e, --extension LOOKUP  Extension by ID/NAME
- *  -t, --type VAL          Type
- *
- *  Additional Flags
- *  -v, --verbose           Verbose
+ * For Help
+ *   php autoupdate.php -h
  *
  */
 
 // Set flag that this is a parent file.
   const _JEXEC = 1;
+  const _JoomlaCliAutoUpdateVersion = '0.1.0';
 
 // Initialize Environment
   error_reporting(E_ALL | E_NOTICE);
@@ -63,7 +49,7 @@
  *
  * @since  3.4
  */
-  class AutoUpdateCron extends JApplicationCli {
+  class JoomlaCliAutoUpdate extends JApplicationCli {
 
     public function __construct(JInputCli $input = null, JRegistry $config = null, JDispatcher $dispatcher = null){
 
@@ -329,6 +315,33 @@
 
     }
 
+    public function doEchoHelp(){
+      $version = _JoomlaCliAutoUpdateVersion;
+      echo <<<EOHELP
+Joomla! CLI Autoupdate by Webuddha v{$version}
+This script can be used to examine the extension of a local Joomla!
+installation, fetch available updates, download and install update packages.
+
+Operations
+  -f, --fetch             Run Fetch
+  -u, --update            Run Update
+  -l, --list              List Updates
+  -x, --export            Export Updates JSON
+
+Update Filters
+  -i, --id ID             Update ID
+  -a, --all               All Packages
+  -V, --version VER       Version Filter
+  -c, --core              Joomla! Core Packages
+  -e, --extension LOOKUP  Extension by ID/NAME
+  -t, --type VAL          Type
+
+Additional Flags
+  -v, --verbose           Verbose
+
+EOHELP;
+    }
+
     public function doExecute(){
 
       if( $this->input->get('f', $this->input->get('fetch')) ){
@@ -345,10 +358,14 @@
         $this->doIterateUpdates();
       }
 
+      if( $this->input->get('h', $this->input->get('help')) ){
+        $this->doEchoHelp();
+      }
+
     }
 
   }
 
 // Trigger Execution
-  JApplicationCli::getInstance('AutoUpdateCron')
+  JApplicationCli::getInstance('JoomlaCliAutoUpdate')
     ->execute();

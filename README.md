@@ -31,4 +31,5 @@ Add autoupdate.php to the cli folder of a joomla installation.
 
     Additional Flags
     
+    -h, --help              Help
     -v, --verbose           Verbose
