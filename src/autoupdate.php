@@ -11,7 +11,7 @@
  */
 
 // Set Version
-  const _JoomlaCliAutoUpdateVersion = '0.1.0';
+  const _JoomlaCliAutoUpdateVersion = '0.2.0';
 
 // Set parent system flag
   if( !defined('_JEXEC') ){
