@@ -44,6 +44,12 @@
   if( !isset($_SERVER['HTTP_HOST']) )
     $_SERVER['HTTP_HOST'] = 'cms';
 
+/**
+ * 11: includes\framework.php
+ */
+  if( !isset($_SERVER['HTTP_USER_AGENT']) )
+    $_SERVER['HTTP_USER_AGENT'] = 'cms';
+
 // Load application
   require_once JPATH_BASE . '/includes/framework.php';
   JFactory::getApplication('cms');
@@ -214,7 +220,12 @@
         }
         if( $build_url ){
           $update = new JUpdate();
-          $update->loadFromXml($build_url, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
+          if( defined('JUpdater::STABILITY_STABLE') ){
+            $update->loadFromXml($build_url, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
+          }
+          else {
+            $update->loadFromXml($build_url);
+          }
           if( !empty($updateRow->extra_query) ){
             $update->set('extra_query', $updateRow->extra_query);
           }
@@ -236,7 +247,7 @@
         }
         $this->out(' - Download ' . $package_url);
         $p_file = JInstallerHelper::downloadPackage($package_url);
-        if( $p_file ){
+        if( $p_file && is_file($tmpPath . '/' . $p_file) ){
           $filePath = $tmpPath . '/' . $p_file;
         }
         else {
@@ -268,7 +279,7 @@
 
       // Catch Error
         if( !is_file($filePath) ){
-          $this->out(' - Download Failed/ File not found');
+          $this->out(' - Download Failed / File not found');
           return false;
         }
 
