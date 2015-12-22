@@ -140,6 +140,10 @@
               )
           ->execute();
         $this->out('Reset Update Cache');
+
+      // Floor Cache Timeout
+        $this->installer->params->set('cachetimeout', 0);
+
     }
 
     /**
