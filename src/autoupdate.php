@@ -379,6 +379,7 @@
           }
           $run_update_rows = array();
           do {
+            foreach( $run_update_rows AS $update_row ){
             if( $do_export ){
               $export_data['updates'][] = $update_row;
             }
@@ -390,6 +391,7 @@
                 str_pad($update_row->type, 15, ' ', STR_PAD_RIGHT),
                 str_pad($update_row->version, 10, ' ', STR_PAD_RIGHT)
                 )));
+              }
             }
             if( $do_update ){
               $run_update_rows += $update_rows;
