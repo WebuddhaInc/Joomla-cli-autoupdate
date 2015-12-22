@@ -39,8 +39,8 @@
   }
 
 // Load application
-  require_once JPATH_LIBRARIES . '/import.legacy.php';
-  require_once JPATH_LIBRARIES . '/cms.php';
+  require_once JPATH_BASE . '/includes/framework.php';
+  JFactory::getApplication('cms');
 
 // Load the configuration
   require_once JPATH_CONFIGURATION . '/configuration.php';
