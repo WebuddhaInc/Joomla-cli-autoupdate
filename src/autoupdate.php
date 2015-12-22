@@ -10,9 +10,13 @@
  *
  */
 
-// Set flag that this is a parent file.
-  const _JEXEC = 1;
+// Set Version
   const _JoomlaCliAutoUpdateVersion = '0.1.0';
+
+// Set parent system flag
+  if( !defined('_JEXEC') ){
+    define('_JEXEC', 1);
+  }
 
 // Initialize Environment
   error_reporting(E_ALL | E_NOTICE);
@@ -51,6 +55,18 @@
  */
   class JoomlaCliAutoUpdate extends JApplicationCli {
 
+    /**
+     * [$__outputBuffer description]
+     * @var null
+     */
+    public $__outputBuffer = null;
+
+    /**
+     * [__construct description]
+     * @param JInputCli|null   $input      [description]
+     * @param JRegistry|null   $config     [description]
+     * @param JDispatcher|null $dispatcher [description]
+     */
     public function __construct(JInputCli $input = null, JRegistry $config = null, JDispatcher $dispatcher = null){
 
       // CLI Constructor
@@ -88,6 +104,36 @@
 
     }
 
+    /**
+     * [doPurgeUpdatesCache description]
+     * @return [type] [description]
+     */
+    public function doPurgeUpdatesCache(){
+
+      // Purge Updates Table
+        $this->db
+          ->setQuery(
+            $this->db->getQuery(true)
+              ->delete($this->db->quoteName('#__updates'))
+              )
+          ->execute();
+        $this->out('Purged Updates');
+
+      // Reset Cache
+        $this->db
+          ->setQuery(
+            $this->db->getQuery(true)
+              ->update($this->db->quoteName('#__update_sites'))
+              ->set($this->db->quoteName('last_check_timestamp') . ' = 0')
+              )
+          ->execute();
+        $this->out('Reset Update Cache');
+    }
+
+    /**
+     * [doFetchUpdates description]
+     * @return [type] [description]
+     */
     public function doFetchUpdates(){
 
       // Get the update cache time
@@ -95,57 +141,73 @@
         $cache_timeout = 3600 * $cache_timeout;
 
       // Find all updates
-        $this->out('Fetching updates...');
         $this->updater->findUpdates(0, $cache_timeout);
-        $this->out('Finished fetching updates');
+        $this->out('Fetched Updates');
 
     }
 
-    public function getNextUpdateId( $lookup = null ){
+    /**
+     * [getUpdateRows description]
+     * @param  [type] $lookup [description]
+     * @param  [type] $start  [description]
+     * @param  [type] $limit  [description]
+     * @return [type]         [description]
+     */
+    public function getUpdateRows( $lookup = null, $start = null, $limit = null ){
 
-      $update_row = $this->getNextUpdateRow( $lookup );
-      return $update_row ? $update_row->id : null;
+      // Prepare Query
+        $query = $this->db->getQuery(true)
+          ->select('*')
+          ->from('#__updates')
+          ->where($this->db->quoteName('extension_id') . ' != ' . $this->db->quote(0));
+
+      // Prepare Filter
+        if( is_numeric($lookup) ){
+          $lookup = array('extension_id' => $lookup);
+        }
+        else if( is_string($lookup) ){
+          $lookup = array('element' => $lookup);
+        }
+        else if( is_array($lookup) ){
+          $lookup = (array)$lookup;
+        }
+        if( $lookup ){
+          foreach( $lookup AS $key => $val ){
+            $query->where($this->db->quoteName( $key ) . ' = ' . $this->db->quote($val));
+          }
+        }
+
+      // Query
+        return
+          $this->db
+            ->setQuery($query, $start, $limit)
+            ->loadObjectList();
 
     }
 
-    public function getNextUpdateRow( $lookup = null ){
-
-      $query = $this->db->getQuery(true)
-        ->select('*')
-        ->from('#__updates')
-        ->where($this->db->quoteName('extension_id') . ' != ' . $this->db->quote(0));
-
-      $lookup = array();
-      if( is_numeric($lookup) ){
-        $lookup = array('extension_id' => $lookup);
-      }
-      else if( is_string($lookup) ){
-        $lookup = array('element' => $lookup);
-      }
-      else if( is_array($lookup) ){
-        $lookup = (array)$lookup;
-      }
-
-      foreach( $lookup AS $key => $val ){
-        $query->where($this->db->quoteName( $key ) . ' = ' . $this->db->quote($val));
-      }
-
-      return
-        $this->db
-          ->setQuery($query, 0, 1)
-          ->loadObject();
-
-    }
-
-    public function doInstallUpdate( $update_row ){
+    /**
+     * [doInstallUpdate description]
+     * @param  [type] $update_row [description]
+     * @return [type]             [description]
+     */
+    public function doInstallUpdate( $update_id, $update_url = null ){
 
       // Load
-        $this->out('Loading update #'. $update_row->update_id .'...');
         $update = new JUpdate();
-        $updateRow = JTable::getInstance('update');
-        $updateRow->load( $update_row->update_id );
-        $update->loadFromXml($updateRow->detailsurl, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
-        $update->set('extra_query', $updateRow->extra_query);
+        if( $update_id ){
+          $this->out('Processing Update #'. $update_id);
+          $updateRow = JTable::getInstance('update');
+          $updateRow->load( $update_id );
+          $update->loadFromXml($updateRow->detailsurl, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
+          $update->set('extra_query', $updateRow->extra_query);
+        }
+        else if( $parse_url = parse_url( $update_url ) ){
+          $this->out('Processing Update from '. $parse_url['host']);
+          $update->loadFromXml($update_url, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
+        }
+        else {
+          return false;
+        }
 
       // Download
         $tmpPath = $this->config->get('tmp_path');
@@ -163,7 +225,7 @@
           $filePath = $tmpPath . '/' . $p_file;
         }
         else {
-          $this->out(' - Download Failed, Attempting alternate download method...');
+          $this->out(' - Download Failed, Attempting alternate download method');
           $urlFile = preg_replace('/^.*\/(.*?)$/', '$1', $url);
           $filePath = $tmpPath . '/' . $urlFile;
           if( $fileHandle = @fopen($filePath, 'w+') ){
@@ -196,7 +258,7 @@
         }
 
       // Extracting Package
-        $this->out(' - Extracting Package...');
+        $this->out(' - Extracting Package');
         $package = JInstallerHelper::unpack($filePath);
         if( !$package ){
           $this->out(' - Extract Failed');
@@ -205,7 +267,7 @@
         }
 
       // Install the package
-        $this->out(' - Installing ' . $package['dir'] . '...');
+        $this->out(' - Installing ' . $package['dir']);
         $installer = JInstaller::getInstance();
         $update->set('type', $package['type']);
         if( !$installer->update($package['dir']) ){
@@ -226,53 +288,71 @@
 
     }
 
+    /**
+     * [doIterateUpdates description]
+     * @return [type] [description]
+     */
     public function doIterateUpdates(){
 
       // Build Update Filter
         $update_lookup = array();
 
+      // All Items
         if( $this->input->get('a', $this->input->get('all')) ){
         }
 
+      // Core Items
         if( $this->input->get('c', $this->input->get('core')) ){
-          $update_lookup[] = array(
+          $lookup = array(
             'type'    => 'file',
-            'element' => 'joomla',
-            'version' => $this->input->get('v', $this->input->get('version'))
+            'element' => 'joomla'
+            );
+          if( $version = $this->input->get('v', $this->input->get('version')) ){
+            $lookup['version'] = $version;
+          }
+          $update_lookup[] = $lookup;
+        }
+
+      // Extension Lookup
+        if( $extension_lookup = $this->input->get('e', $this->input->get('extension')) ){
+          if( is_numeric($extension_lookup) ){
+            $lookup = array(
+              'extension_id' => (int)$extension_lookup
+              );
+          }
+          else {
+            $lookup = array(
+              'element' => (string)$extension_lookup
+              );
+          }
+          if( $type = $this->input->get('t', $this->input->get('type')) ){
+            $lookup['type'] = $type;
+          }
+          if( $version = $this->input->get('v', $this->input->get('version')) ){
+            $lookup['version'] = $version;
+          }
+          $update_lookup[] = $lookup;
+        }
+
+        if( $update_id = $this->input->get('i', $this->input->get('id')) ){
+          $update_lookup[] = array(
+            'update_id' => $update_id
             );
         }
 
-        if( $extension_lookup = $this->input->get('e', $this->input->get('extension')) ){
-          if( is_string($extension_lookup) ){
-            $update_lookup[] = array(
-              'element' => $extension_lookup,
-              'type'    => $this->input->get('t', $this->input->get('type')),
-              'version' => $this->input->get('V', $this->input->get('version'))
-              );
-          }
-          else if( is_numeric($extension_lookup) ){
-            $update_lookup[] = array(
-              'extension_id' => $extension_lookup,
-              'type'         => $this->input->get('t', $this->input->get('type')),
-              'version'      => $this->input->get('V', $this->input->get('version'))
-              );
-          }
-        }
-
       // List / Export / Process Updates
-        $update_id  = $this->input->get('i', $this->input->get('id'));
-        $update_row = null;
-        if( $update_id ){
-          $update_row = (object)array('update_id' => $update_id);
-        }
-        else {
-          $update_row = $this->getNextUpdateRow( array_shift($update_lookup) );
-        }
-        if( $update_row ){
-          $do_list   = $this->input->get('l', $this->input->get('list'));
-          $do_export = !$do_list && $this->input->get('x', $this->input->get('export'));
-          $do_update = !$do_list && !$do_export && $this->input->get('u', $this->input->get('update'));
-          if( $do_list ){
+        $update_rows = $this->getUpdateRows( array_shift($update_lookup) );
+        if( $update_rows ){
+          $do_list     = $this->input->get('l', $this->input->get('list'));
+          $do_export   = $this->input->get('x', $this->input->get('export'));
+          $do_update   = $this->input->get('u', $this->input->get('update'));
+          $export_data = null;
+          if( $do_export ){
+            $export_data = array(
+              'updates' => array()
+              );
+          }
+          else if( $do_list ){
             $this->out(implode('',array(
               str_pad('update_id', 10, ' ', STR_PAD_RIGHT),
               str_pad('extension_id', 15, ' ', STR_PAD_RIGHT),
@@ -282,31 +362,36 @@
               )));
           }
           do {
-            if( $do_export ){
-              $this->out( json_encode($update_row) );
-            }
-            if( $do_list ){
-              $this->out(implode('',array(
-                str_pad($update_row->update_id, 10, ' ', STR_PAD_RIGHT),
-                str_pad($update_row->extension_id, 15, ' ', STR_PAD_RIGHT),
-                str_pad($update_row->element, 30, ' ', STR_PAD_RIGHT),
-                str_pad($update_row->type, 15, ' ', STR_PAD_RIGHT),
-                str_pad($update_row->version, 10, ' ', STR_PAD_RIGHT)
-                )));
-            }
-            if( $do_update ){
-              $this->out('Processing Update #' . $update_row->update_id .'...');
-              if( !$this->doInstallUpdate( $update_row ) ){
-                $this->out(' - Installation Failed - ABORT');
-                return false;
+            foreach( $update_rows AS $update_row ){
+              if( isset($export_data) ){
+                $export_data['updates'][] = $update_row;
+              }
+              else if( $do_list ){
+                $this->out(implode('',array(
+                  str_pad($update_row->update_id, 10, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->extension_id, 15, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->element, 30, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->type, 15, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->version, 10, ' ', STR_PAD_RIGHT)
+                  )));
+              }
+              if( $do_update ){
+                $this->out('Processing Update #' . $update_row->update_id);
+                if( !$this->doInstallUpdate( $update_row->update_id ) ){
+                  $this->out(' - Installation Failed - ABORT');
+                  return false;
+                }
               }
             }
           } while(
             count($update_lookup)
-            && $update_row = $this->getNextUpdateRow(array_shift($update_lookup))
+            && $update_rows = $this->getUpdateRows( array_shift($update_lookup) )
             );
           if( $do_update ){
             $this->out('Update processing complete');
+          }
+          if( isset($export_data) ){
+            $this->out( $export_data );
           }
         }
         else {
@@ -315,6 +400,88 @@
 
     }
 
+    /**
+     * [startOutputBuffer description]
+     * @return [type] [description]
+     */
+    public function startOutputBuffer(){
+      $this->__outputBuffer = array(
+        'log'    => array(),
+        'data'   => array()
+        );
+    }
+
+    /**
+     * [dumpOutputBuffer description]
+     * @return [type] [description]
+     */
+    public function dumpOutputBuffer(){
+      return parent::out( json_encode($this->__outputBuffer) );
+    }
+
+    /**
+     * [out description]
+     * @param  string  $text [description]
+     * @param  boolean $nl   [description]
+     * @return [type]        [description]
+     */
+    public function out( $text = '', $nl = true ){
+      if( isset($this->__outputBuffer) ){
+        if( is_string($text) ){
+          $this->__outputBuffer['log'][] = $text;
+        }
+        else {
+          $this->__outputBuffer['data'][] = $text;
+        }
+        return $this;
+      }
+      return parent::out( $text, $nl );
+    }
+
+    /**
+     * [doExecute description]
+     * @return [type] [description]
+     */
+    public function doExecute(){
+
+      if( $this->input->get('x', $this->input->get('export')) ){
+        $this->startOutputBuffer();
+      }
+
+      if( $this->input->get('p', $this->input->get('purge')) ){
+        $this->doPurgeUpdatesCache();
+      }
+
+      if( $this->input->get('f', $this->input->get('fetch')) ){
+        $this->doFetchUpdates();
+      }
+
+      if(
+        $this->input->get('l', $this->input->get('list'))
+        ||
+        $this->input->get('u', $this->input->get('update'))
+        ){
+        $this->doIterateUpdates();
+      }
+
+      if( $package_url = $this->input->getRaw('P', $this->input->getRaw('package')) ){
+        $this->doInstallUpdate( null, $package_url );
+      }
+
+      if( $this->input->get('h', $this->input->get('help')) ){
+        $this->doEchoHelp();
+      }
+
+      if( $this->input->get('x', $this->input->get('export')) ){
+        $this->dumpOutputBuffer();
+      }
+
+    }
+
+    /**
+     * [doEchoHelp description]
+     * @return [type] [description]
+     */
     public function doEchoHelp(){
       $version = _JoomlaCliAutoUpdateVersion;
       echo <<<EOHELP
@@ -326,7 +493,8 @@ Operations
   -f, --fetch             Run Fetch
   -u, --update            Run Update
   -l, --list              List Updates
-  -x, --export            Export Updates JSON
+  -p, --purge             Purge Updates
+  -P, --package-xml URL   Install from Package XML
 
 Update Filters
   -i, --id ID             Update ID
@@ -337,31 +505,11 @@ Update Filters
   -t, --type VAL          Type
 
 Additional Flags
+  -x, --export            Output in JSON format
+  -h, --help              Help
   -v, --verbose           Verbose
 
 EOHELP;
-    }
-
-    public function doExecute(){
-
-      if( $this->input->get('f', $this->input->get('fetch')) ){
-        $this->doFetchUpdates();
-      }
-
-      if(
-        $this->input->get('l', $this->input->get('list'))
-        ||
-        $this->input->get('x', $this->input->get('export'))
-        ||
-        $this->input->get('u', $this->input->get('update'))
-        ){
-        $this->doIterateUpdates();
-      }
-
-      if( $this->input->get('h', $this->input->get('help')) ){
-        $this->doEchoHelp();
-      }
-
     }
 
   }
