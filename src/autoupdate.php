@@ -379,18 +379,18 @@
           }
           $run_update_rows = array();
           do {
-            foreach( $run_update_rows AS $update_row ){
-            if( $do_export ){
-              $export_data['updates'][] = $update_row;
-            }
-            else if( $do_list ){
-              $this->out(implode('',array(
-                str_pad($update_row->update_id, 10, ' ', STR_PAD_RIGHT),
-                str_pad($update_row->extension_id, 15, ' ', STR_PAD_RIGHT),
-                str_pad($update_row->element, 30, ' ', STR_PAD_RIGHT),
-                str_pad($update_row->type, 15, ' ', STR_PAD_RIGHT),
-                str_pad($update_row->version, 10, ' ', STR_PAD_RIGHT)
-                )));
+            foreach( $update_rows AS $update_row ){
+              if( $do_export ){
+                $export_data['updates'][] = $update_row;
+              }
+              else if( $do_list ){
+                $this->out(implode('',array(
+                  str_pad($update_row->update_id, 10, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->extension_id, 15, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->element, 30, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->type, 15, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->version, 10, ' ', STR_PAD_RIGHT)
+                  )));
               }
             }
             if( $do_update ){
