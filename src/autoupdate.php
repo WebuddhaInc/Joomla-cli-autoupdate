@@ -11,17 +11,24 @@
  */
 
 // Set Version
-  const _JoomlaCliAutoUpdateVersion = '0.1.0';
+  const _JoomlaCliAutoUpdateVersion = '0.2.0';
+
+/**
+ * 869: joomla\application\web
+ */
+  if( !isset($_SERVER['HTTP_HOST']) )
+    $_SERVER['HTTP_HOST'] = 'cms';
+
+/**
+ * 11: includes\framework.php
+ */
+  if( !isset($_SERVER['HTTP_USER_AGENT']) )
+    $_SERVER['HTTP_USER_AGENT'] = 'cms';
 
 // Set parent system flag
   if( !defined('_JEXEC') ){
     define('_JEXEC', 1);
   }
-
-// Initialize Environment
-  error_reporting(E_ALL | E_NOTICE);
-  ini_set('display_errors', 1);
-  set_time_limit(0);
 
 // Define ase
   if( !defined('JPATH_BASE') ){
@@ -38,9 +45,21 @@
     require_once JPATH_BASE . '/includes/defines.php';
   }
 
-// Load application
-  require_once JPATH_LIBRARIES . '/import.legacy.php';
-  require_once JPATH_LIBRARIES . '/cms.php';
+// Load Framework
+  require_once JPATH_BASE . '/includes/framework.php';
+
+// Update Error Reporting
+  error_reporting(E_ALL ^ E_WARNING ^ E_NOTICE ^ E_STRICT ^ E_DEPRECATED);
+  ini_set('display_errors', 1);
+  set_time_limit(0);
+
+// Iniitialize Application
+  if( version_compare( JVERSION, '3.2.0', '>=' ) ){
+    JFactory::getApplication('cms');
+  }
+  else if( version_compare( JVERSION, '3.1.0', '>=' ) ){
+    JFactory::getApplication('site');
+  }
 
 // Load the configuration
   require_once JPATH_CONFIGURATION . '/configuration.php';
@@ -128,6 +147,10 @@
               )
           ->execute();
         $this->out('Reset Update Cache');
+
+      // Floor Cache Timeout
+        $this->installer->params->set('cachetimeout', 0);
+
     }
 
     /**
@@ -187,26 +210,45 @@
 
     /**
      * [doInstallUpdate description]
-     * @param  [type] $update_row [description]
-     * @return [type]             [description]
+     * @param  [type] $update_id   [description]
+     * @param  [type] $build_url   [description]
+     * @param  [type] $package_url [description]
+     * @return [type]              [description]
      */
-    public function doInstallUpdate( $update_id, $update_url = null ){
+    public function doInstallUpdate( $update_id, $build_url = null, $package_url = null ){
 
-      // Load
-        $update = new JUpdate();
-        if( $update_id ){
-          $this->out('Processing Update #'. $update_id);
-          $updateRow = JTable::getInstance('update');
-          $updateRow->load( $update_id );
-          $update->loadFromXml($updateRow->detailsurl, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
-          $update->set('extra_query', $updateRow->extra_query);
+      // Load Build XML
+        if( $update_id || $build_url ){
+          if( $update_id ){
+            $this->out('Processing Update #'. $update_id);
+            $updateRow = JTable::getInstance('update');
+            $updateRow->load( $update_id );
+            $build_url = $updateRow->detailsurl;
+          }
+          else if( $parse_url = parse_url( $build_url ) ){
+            $this->out('Processing Update from '. $parse_url['host']);
+          }
         }
-        else if( $parse_url = parse_url( $update_url ) ){
-          $this->out('Processing Update from '. $parse_url['host']);
-          $update->loadFromXml($update_url, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
+        if( $build_url ){
+          $update = new JUpdate();
+          if( defined('JUpdater::STABILITY_STABLE') ){
+            $update->loadFromXml($build_url, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
+          }
+          else {
+            $update->loadFromXml($build_url);
+          }
+          if( !empty($updateRow->extra_query) ){
+            $update->set('extra_query', $updateRow->extra_query);
+          }
         }
-        else {
-          return false;
+
+      // Pull Packge URL from Build
+        if( isset($update) && empty($package_url) ){
+          $package_url = $update->downloadurl->_data;
+          if( $extra_query = $update->get('extra_query') ){
+            $package_url .= (strpos($package_url, '?') === false) ? '?' : '&amp;';
+            $package_url .= $extra_query;
+          }
         }
 
       // Download
@@ -214,24 +256,19 @@
         if( !is_writeable($tmpPath) ){
           $tmpPath = JPATH_BASE . '/tmp';
         }
-        $url = $update->downloadurl->_data;
-        if ($extra_query = $update->get('extra_query')){
-          $url .= (strpos($url, '?') === false) ? '?' : '&amp;';
-          $url .= $extra_query;
-        }
-        $this->out(' - Download ' . $url);
-        $p_file = JInstallerHelper::downloadPackage($url);
-        if( $p_file ){
+        $this->out(' - Download ' . $package_url);
+        $p_file = JInstallerHelper::downloadPackage($package_url);
+        if( $p_file && is_file($tmpPath . '/' . $p_file) ){
           $filePath = $tmpPath . '/' . $p_file;
         }
         else {
           $this->out(' - Download Failed, Attempting alternate download method');
-          $urlFile = preg_replace('/^.*\/(.*?)$/', '$1', $url);
+          $urlFile = preg_replace('/^.*\/(.*?)$/', '$1', $package_url);
           $filePath = $tmpPath . '/' . $urlFile;
           if( $fileHandle = @fopen($filePath, 'w+') ){
-            $curl = curl_init($url);
+            $curl = curl_init($package_url);
             curl_setopt_array($curl, [
-              CURLOPT_URL            => $url,
+              CURLOPT_URL            => $package_url,
               CURLOPT_FOLLOWLOCATION => 1,
               CURLOPT_BINARYTRANSFER => 1,
               CURLOPT_RETURNTRANSFER => 1,
@@ -253,7 +290,7 @@
 
       // Catch Error
         if( !is_file($filePath) ){
-          $this->out(' - Download Failed/ File not found');
+          $this->out(' - Download Failed / File not found');
           return false;
         }
 
@@ -269,7 +306,7 @@
       // Install the package
         $this->out(' - Installing ' . $package['dir']);
         $installer = JInstaller::getInstance();
-        $update->set('type', $package['type']);
+        // $update->set('type', $package['type']);
         if( !$installer->update($package['dir']) ){
           $this->out(' - Update Error');
           $result = false;
@@ -334,6 +371,7 @@
           $update_lookup[] = $lookup;
         }
 
+      // Update ID
         if( $update_id = $this->input->get('i', $this->input->get('id')) ){
           $update_lookup[] = array(
             'update_id' => $update_id
@@ -361,9 +399,10 @@
               str_pad('version', 10, ' ', STR_PAD_RIGHT)
               )));
           }
+          $run_update_rows = array();
           do {
             foreach( $update_rows AS $update_row ){
-              if( isset($export_data) ){
+              if( $do_export ){
                 $export_data['updates'][] = $update_row;
               }
               else if( $do_list ){
@@ -375,19 +414,20 @@
                   str_pad($update_row->version, 10, ' ', STR_PAD_RIGHT)
                   )));
               }
-              if( $do_update ){
-                $this->out('Processing Update #' . $update_row->update_id);
-                if( !$this->doInstallUpdate( $update_row->update_id ) ){
-                  $this->out(' - Installation Failed - ABORT');
-                  return false;
-                }
-              }
+            }
+            if( $do_update ){
+              $run_update_rows += $update_rows;
             }
           } while(
             count($update_lookup)
             && $update_rows = $this->getUpdateRows( array_shift($update_lookup) )
             );
-          if( $do_update ){
+          if( count($run_update_rows) ){
+            foreach( $run_update_rows AS $update_row ){
+              if( !$this->doInstallUpdate( $update_row->update_id ) ){
+                return false;
+              }
+            }
             $this->out('Update processing complete');
           }
           if( isset($export_data) ){
@@ -464,8 +504,14 @@
         $this->doIterateUpdates();
       }
 
-      if( $package_url = $this->input->getRaw('P', $this->input->getRaw('package')) ){
-        $this->doInstallUpdate( null, $package_url );
+      $build_url = $this->input->getRaw('B', $this->input->getRaw('build-xml'));
+      if( $build_url && $build_url != 1 ){
+        $this->doInstallUpdate( null, $build_url );
+      }
+
+      $package_url = $this->input->getRaw('P', $this->input->getRaw('package-archive'));
+      if( $package_url && $package_url != 1 ){
+        $this->doInstallUpdate( null, null, $package_url );
       }
 
       if( $this->input->get('h', $this->input->get('help')) ){
@@ -490,24 +536,25 @@ This script can be used to examine the extension of a local Joomla!
 installation, fetch available updates, download and install update packages.
 
 Operations
-  -f, --fetch             Run Fetch
-  -u, --update            Run Update
-  -l, --list              List Updates
-  -p, --purge             Purge Updates
-  -P, --package-xml URL   Install from Package XML
+  -f, --fetch                 Run Fetch
+  -u, --update                Run Update
+  -l, --list                  List Updates
+  -p, --purge                 Purge Updates
+  -P, --package-archive URL   Install from Package Archive
+  -B, --build-xml URL         Install from Package Build XML
 
 Update Filters
-  -i, --id ID             Update ID
-  -a, --all               All Packages
-  -V, --version VER       Version Filter
-  -c, --core              Joomla! Core Packages
-  -e, --extension LOOKUP  Extension by ID/NAME
-  -t, --type VAL          Type
+  -i, --id ID                 Update ID
+  -a, --all                   All Packages
+  -V, --version VER           Version Filter
+  -c, --core                  Joomla! Core Packages
+  -e, --extension LOOKUP      Extension by ID/NAME
+  -t, --type VAL              Type
 
 Additional Flags
-  -x, --export            Output in JSON format
-  -h, --help              Help
-  -v, --verbose           Verbose
+  -x, --export                Output in JSON format
+  -h, --help                  Help
+  -v, --verbose               Verbose
 
 EOHELP;
     }
