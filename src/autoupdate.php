@@ -50,9 +50,20 @@
   if( !isset($_SERVER['HTTP_USER_AGENT']) )
     $_SERVER['HTTP_USER_AGENT'] = 'cms';
 
-// Load application
+// Load Framework
   require_once JPATH_BASE . '/includes/framework.php';
-  JFactory::getApplication('cms');
+
+// Update Error Reporting
+  error_reporting(E_ALL ^ E_WARNING ^ E_NOTICE ^ E_STRICT ^ E_DEPRECATED);
+  ini_set('display_errors', 1);
+
+// Iniitialize Application
+  if( version_compare( JVERSION, '3.2.0', '>=' ) ){
+    JFactory::getApplication('cms');
+  }
+  else if( version_compare( JVERSION, '3.1.0', '>=' ) ){
+    JFactory::getApplication('site');
+  }
 
 // Load the configuration
   require_once JPATH_CONFIGURATION . '/configuration.php';
