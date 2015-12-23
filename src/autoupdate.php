@@ -13,15 +13,22 @@
 // Set Version
   const _JoomlaCliAutoUpdateVersion = '0.2.0';
 
+/**
+ * 869: joomla\application\web
+ */
+  if( !isset($_SERVER['HTTP_HOST']) )
+    $_SERVER['HTTP_HOST'] = 'cms';
+
+/**
+ * 11: includes\framework.php
+ */
+  if( !isset($_SERVER['HTTP_USER_AGENT']) )
+    $_SERVER['HTTP_USER_AGENT'] = 'cms';
+
 // Set parent system flag
   if( !defined('_JEXEC') ){
     define('_JEXEC', 1);
   }
-
-// Initialize Environment
-  error_reporting(E_ALL | E_NOTICE);
-  ini_set('display_errors', 1);
-  set_time_limit(0);
 
 // Define ase
   if( !defined('JPATH_BASE') ){
@@ -38,24 +45,13 @@
     require_once JPATH_BASE . '/includes/defines.php';
   }
 
-/**
- * 869: joomla\application\web
- */
-  if( !isset($_SERVER['HTTP_HOST']) )
-    $_SERVER['HTTP_HOST'] = 'cms';
-
-/**
- * 11: includes\framework.php
- */
-  if( !isset($_SERVER['HTTP_USER_AGENT']) )
-    $_SERVER['HTTP_USER_AGENT'] = 'cms';
-
 // Load Framework
   require_once JPATH_BASE . '/includes/framework.php';
 
 // Update Error Reporting
   error_reporting(E_ALL ^ E_WARNING ^ E_NOTICE ^ E_STRICT ^ E_DEPRECATED);
   ini_set('display_errors', 1);
+  set_time_limit(0);
 
 // Iniitialize Application
   if( version_compare( JVERSION, '3.2.0', '>=' ) ){
