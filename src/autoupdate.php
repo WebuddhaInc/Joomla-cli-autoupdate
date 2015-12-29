@@ -402,6 +402,17 @@
           $run_update_rows = array();
           do {
             foreach( $update_rows AS $update_row ){
+              $extension = $this->db
+                ->setQuery("
+                  SELECT *
+                  FROM `#__extensions`
+                  WHERE `extension_id` = '". (int)$update_row->extension_id ."'
+                  ")
+                ->loadObject();
+              $update_row->installed_version = null;
+              if( $extension->manifest_cache && $extension_manifest = json_decode($extension->manifest_cache) ){
+                $update_row->installed_version = $extension_manifest ? $extension_manifest->version : null;
+              }
               if( $do_export ){
                 $export_data['updates'][] = $update_row;
               }
@@ -471,7 +482,7 @@
           $this->__outputBuffer['log'][] = $text;
         }
         else {
-          $this->__outputBuffer['data'][] = $text;
+          $this->__outputBuffer['data'] = array_merge( $this->__outputBuffer['data'], $text );
         }
         return $this;
       }

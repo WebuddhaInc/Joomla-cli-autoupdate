@@ -10,12 +10,14 @@
 
 // Filter Required
   if( empty($ipFilter) && empty($userFilter) ){
-    die('Authorization Required');
+    header('HTTP/1.0 403 Forbidden'); // . $_SERVER['REMOTE_ADDR']);
+    die('HTTP/1.0 403 Forbidden');
   }
 
 // Simple IP Filter
   if( !empty($ipFilter) && !in_array($_SERVER['REMOTE_ADDR'], $ipFilter) ){
-    die('Remote Invalid');
+    header('HTTP/1.0 401 Unauthorized');
+    die('HTTP/1.0 401 Unauthorized');
   }
 
 // User Auth Filter
@@ -44,17 +46,18 @@
     // User Auth Check
 
       $headers = getallheaders();
-      $headers['Authorization'] = 'Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==';
       if( !empty($headers['Authorization']) ){
         $headerAuth = explode(' ', $headers['Authorization'], 2);
         $authCredentials = array_combine(array('username', 'password'), explode(':', base64_decode(end($headerAuth)), 2));
         $authResult = JAuthentication::getInstance()->authenticate($authCredentials);
         if( !$authResult || $authResult->status != 1 ){
-          die('Login Invalid');
+          header('HTTP/1.0 401 Unauthorized');
+          die('HTTP/1.0 401 Unauthorized');
         }
       }
       else {
-        die('Invalid Authorization');
+        header('HTTP/1.0 400 Bad Request');
+        die('HTTP/1.0 400 Bad Request');
       }
 
   }
