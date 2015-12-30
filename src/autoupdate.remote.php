@@ -49,6 +49,10 @@
       if( !empty($headers['Authorization']) ){
         $headerAuth = explode(' ', $headers['Authorization'], 2);
         $authCredentials = array_combine(array('username', 'password'), explode(':', base64_decode(end($headerAuth)), 2));
+        if( is_array($userFilter) && !in_array($authCredentials['username'], $userFilter) ){
+          header('HTTP/1.0 401 Unauthorized');
+          die('HTTP/1.0 401 Unauthorized');
+        }
         $authResult = JAuthentication::getInstance()->authenticate($authCredentials);
         if( !$authResult || $authResult->status != 1 ){
           header('HTTP/1.0 401 Unauthorized');
