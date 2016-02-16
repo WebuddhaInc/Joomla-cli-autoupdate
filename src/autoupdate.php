@@ -60,12 +60,16 @@
   else if( version_compare( JVERSION, '3.1.0', '>=' ) ){
     JFactory::getApplication('site');
   }
+  else {
+    JFactory::getApplication('administrator');
+  }
 
 // Load the configuration
   require_once JPATH_CONFIGURATION . '/configuration.php';
 
 // Required Libraries
   jimport('joomla.updater.update');
+  jimport('joomla.application.component.helper');
 
 /**
  * This script will download and install all available updates.
@@ -79,6 +83,10 @@
      * @var null
      */
     public $__outputBuffer = null;
+    public $db             = null;
+    public $updater        = null;
+    public $installer      = null;
+    public $config         = null;
 
     /**
      * [__construct description]
@@ -90,6 +98,11 @@
 
       // CLI Constructor
         parent::__construct($input, $config, $dispatcher);
+
+      // Error Handlers
+        JError::setErrorHandling(E_NOTICE, 'callback', array($this, 'throwNotice'));
+        JError::setErrorHandling(E_WARNING, 'callback', array($this, 'throwWarning'));
+        JError::setErrorHandling(E_ERROR, 'callback', array($this, 'throwError'));
 
       // Utilities
         $this->db        = JFactory::getDBO();
@@ -124,6 +137,34 @@
     }
 
     /**
+     * [throwNotice description]
+     * @param  [type] $error [description]
+     * @return [type]        [description]
+     */
+    public function throwNotice( $error ){
+      $this->out('Notice #' . $error->getCode() .' - ' . JText::_($error->getMessage()));
+    }
+
+    /**
+     * [throwWarning description]
+     * @param  [type] $error [description]
+     * @return [type]        [description]
+     */
+    public function throwWarning( $error ){
+      $this->out('Warning #' . $error->getCode() .' - ' . JText::_($error->getMessage()));
+    }
+
+    /**
+     * [throwError description]
+     * @param  [type] $error [description]
+     * @return [type]        [description]
+     */
+    public function throwError( $error ){
+      $this->out('Error #' . $error->getCode() .' - ' . JText::_($error->getMessage()));
+      die();
+    }
+
+    /**
      * [doPurgeUpdatesCache description]
      * @return [type] [description]
      */
@@ -149,7 +190,9 @@
         $this->out('Reset Update Cache');
 
       // Floor Cache Timeout
+        if( $this->installer ){
         $this->installer->params->set('cachetimeout', 0);
+        }
 
     }
 
@@ -160,7 +203,7 @@
     public function doFetchUpdates(){
 
       // Get the update cache time
-        $cache_timeout = $this->installer->params->get('cachetimeout', 6, 'int');
+        $cache_timeout = ($this->installer ? $this->installer->params->get('cachetimeout', 6, 'int') : 6);
         $cache_timeout = 3600 * $cache_timeout;
 
       // Find all updates
@@ -231,7 +274,7 @@
         }
         if( $build_url ){
           $update = new JUpdate();
-          if( defined('JUpdater::STABILITY_STABLE') ){
+          if( $this->installer && defined('JUpdater::STABILITY_STABLE') ){
             $update->loadFromXml($build_url, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
           }
           else {
@@ -392,11 +435,12 @@
           }
           else if( $do_list ){
             $this->out(implode('',array(
-              str_pad('update_id', 10, ' ', STR_PAD_RIGHT),
-              str_pad('extension_id', 15, ' ', STR_PAD_RIGHT),
+              str_pad('uid', 10, ' ', STR_PAD_RIGHT),
+              str_pad('eid', 10, ' ', STR_PAD_RIGHT),
               str_pad('element', 30, ' ', STR_PAD_RIGHT),
-              str_pad('type', 15, ' ', STR_PAD_RIGHT),
-              str_pad('version', 10, ' ', STR_PAD_RIGHT)
+              str_pad('type', 10, ' ', STR_PAD_RIGHT),
+              str_pad('version', 10, ' ', STR_PAD_RIGHT),
+              str_pad('installed', 10, ' ', STR_PAD_RIGHT)
               )));
           }
           $run_update_rows = array();
@@ -419,10 +463,11 @@
               else if( $do_list ){
                 $this->out(implode('',array(
                   str_pad($update_row->update_id, 10, ' ', STR_PAD_RIGHT),
-                  str_pad($update_row->extension_id, 15, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->extension_id, 10, ' ', STR_PAD_RIGHT),
                   str_pad($update_row->element, 30, ' ', STR_PAD_RIGHT),
-                  str_pad($update_row->type, 15, ' ', STR_PAD_RIGHT),
-                  str_pad($update_row->version, 10, ' ', STR_PAD_RIGHT)
+                  str_pad($update_row->type, 10, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->version, 10, ' ', STR_PAD_RIGHT),
+                  str_pad($update_row->installed_version, 10, ' ', STR_PAD_RIGHT)
                   )));
               }
             }
@@ -457,8 +502,10 @@
      */
     public function startOutputBuffer(){
       $this->__outputBuffer = array(
-        'log'    => array(),
-        'data'   => array()
+        'status'  => 200,
+        'message' => 'Success',
+        'log'     => array(),
+        'data'    => array()
         );
     }
 
