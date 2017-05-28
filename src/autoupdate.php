@@ -11,7 +11,7 @@
  */
 
 // Set Version
-  const _JoomlaCliAutoUpdateVersion = '0.2.0';
+  const _JoomlaCliAutoUpdateVersion = '0.3.0';
 
 /**
  * 869: joomla\application\web
@@ -161,7 +161,7 @@
      */
     public function throwError( $error ){
       $this->out('Error #' . $error->getCode() .' - ' . JText::_($error->getMessage()));
-      die();
+      exit(1);
     }
 
     /**
@@ -261,28 +261,31 @@
     public function doInstallUpdate( $update_id, $build_url = null, $package_url = null ){
 
       // Load Build XML
+        $updateRow = JTable::getInstance('update');
         if( $update_id || $build_url ){
           if( $update_id ){
             $this->out('Processing Update #'. $update_id);
-            $updateRow = JTable::getInstance('update');
             $updateRow->load( $update_id );
             $build_url = $updateRow->detailsurl;
           }
           else if( $parse_url = parse_url( $build_url ) ){
             $this->out('Processing Update from '. $parse_url['host']);
           }
+          if( $build_url ){
+            $update = new JUpdate();
+            if( $this->installer && defined('JUpdater::STABILITY_STABLE') ){
+              $update->loadFromXml($build_url, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
+            }
+            else {
+              $update->loadFromXml($build_url);
+            }
+            if( !empty($updateRow->extra_query) ){
+              $update->set('extra_query', $updateRow->extra_query);
+            }
+          }
         }
-        if( $build_url ){
-          $update = new JUpdate();
-          if( $this->installer && defined('JUpdater::STABILITY_STABLE') ){
-            $update->loadFromXml($build_url, $this->installer->params->get('minimum_stability', JUpdater::STABILITY_STABLE, 'int'));
-          }
-          else {
-            $update->loadFromXml($build_url);
-          }
-          if( !empty($updateRow->extra_query) ){
-            $update->set('extra_query', $updateRow->extra_query);
-          }
+        else if ($package_url) {
+          $this->out('Processing Update from URL');
         }
 
       // Pull Packge URL from Build
@@ -300,7 +303,11 @@
           $tmpPath = JPATH_BASE . '/tmp';
         }
         $this->out(' - Download ' . $package_url);
-        $p_file = JInstallerHelper::downloadPackage($package_url);
+        $t_file = JInstallerHelper::getFilenameFromUrl($package_url);
+        if (!preg_match('/\.zip$/', $t_file)) {
+          $t_file .= '.zip';
+        }
+        $p_file = JInstallerHelper::downloadPackage($package_url, $t_file);
         if( $p_file && is_file($tmpPath . '/' . $p_file) ){
           $filePath = $tmpPath . '/' . $p_file;
         }
@@ -322,11 +329,13 @@
             $response = curl_exec($curl);
             if( $response === false ){
               $this->out(' - Download Failed: ' . curl_error($curl));
+              $this->outStatus(400, 'Download Failed: ' . curl_error($curl));
               return false;
             }
           }
           else {
             $this->out(' - Download Failed, Error writing ' . $filePath);
+            $this->outStatus(400, 'Download Failed, Error writing ' . $filePath);
             return false;
           }
         }
@@ -334,37 +343,165 @@
       // Catch Error
         if( !is_file($filePath) ){
           $this->out(' - Download Failed / File not found');
+          $this->outStatus(400, 'Download Failed / File not found');
           return false;
         }
 
       // Extracting Package
         $this->out(' - Extracting Package');
-        $package = JInstallerHelper::unpack($filePath);
-        if( !$package ){
+        $package = JInstallerHelper::unpack($filePath, true);
+        if( empty($package) || empty($package['extractdir']) ){
           $this->out(' - Extract Failed');
-          JInstallerHelper::cleanupInstall($filePath);
+          $this->outStatus(400, 'Extract Failed');
+          JFile::delete($filePath);
           return false;
         }
+        JFile::delete($filePath);
 
-      // Install the package
-        $this->out(' - Installing ' . $package['dir']);
-        $installer = JInstaller::getInstance();
-        // $update->set('type', $package['type']);
-        if( !$installer->update($package['dir']) ){
-          $this->out(' - Update Error');
-          $result = false;
+      // No Type? Check if Core
+        if (!$package['type'] && is_file($package['extractdir'] . '/administrator/manifests/files/joomla.xml')) {
+          $package['type'] = 'file';
         }
+
+      // Success Flag
+        $success = true;
+
+      // File Installations
+        if ($package['type'] == 'file') {
+
+          // Build Standalone
+            $installer_file = $tmpPath . '/installer_' . time() . '.php';
+            $installer_script = JPATH_BASE . '/plugins/system/wbsitemanager/standaloneInstaller.php';
+            if ($fh = fopen($installer_file, 'w')) {
+              $installer_code = array(
+                '<?php',
+                '/**',
+                ' * wbSiteManager Installer ' . date('Y-m-d H:i:s'),
+                ' */',
+                '',
+                '$time = time();',
+                'include("'. JPATH_BASE .'/plugins/system/wbsitemanager/standaloneInstaller.php");',
+                '$installer = new wbSiteManager_StandaloneInstaller(array(',
+                '  "cache_path"  => "'. $tmpPath .'",',
+                '  "source_path" => "'. $package['extractdir'] .'",',
+                '  "target_path" => "'. JPATH_BASE . '"',
+                '  ));',
+                '$installer->execute();'
+                );
+              fwrite( $fh, implode("\n", $installer_code) );
+              fclose( $fh );
+            }
+            else {
+              $this->out(' - Error: Failed to generate standalone installer');
+              $this->outStatus(400, 'Failed to generate standalone installer');
+              return false;
+            }
+
+          // Call Standalone
+            $this->out('Calling Standalone Installer');
+            $exec_output = shell_exec('php ' . $installer_file);
+            if ($exec_output) {
+              foreach (array_filter(explode("\n", $exec_output), 'strlen') AS $line) {
+                $this->out(' - ' . $line);
+                if (preg_match('/Error: (.*)/', $line, $match)) {
+                  $this->out('-  Error: ' . $match[1]);
+                  $this->outStatus(400, $match[1]);
+                  JFile::delete($installer_file);
+                  return false;
+                }
+              }
+            }
+            else {
+              $this->out('- Error: No Response');
+              $this->outStatus(400, 'No Response');
+              JFile::delete($installer_file);
+              return false;
+            }
+
+          // Cleanup Installer
+            $this->out('- File Upgrade Complete');
+            JFile::delete($installer_file);
+
+          // Delete Installation
+            if (is_dir(JPATH_BASE . '/installation')) {
+              $this->out('Deleting Installation Folder');
+              JFolder::delete(JPATH_BASE . '/installation');
+            }
+
+          // Finalize Core Upgrade (must reload Joomla)
+            $exec_output = shell_exec('cd '.JPATH_BASE.'/cli;php autoupdate.php --purge --fetch --finalize-core-upgrade');
+            foreach (array_filter(explode("\n", $exec_output), 'strlen') AS $line) {
+              $this->out($line);
+              if (preg_match('/Error: (.*)/', $line, $match)) {
+                $this->out('-  Error: ' . $match[1]);
+                $this->outStatus(400, $match[1]);
+                return false;
+              }
+            }
+
+        }
+
+      // Package Installations
+        else if($package['type']) {
+
+          // Log Selection
+            $this->out('Processing ' . $package['type']);
+
+          // Install the package
+            $this->out(' - Installing ' . $package['dir']);
+            $installer = JInstaller::getInstance();
+            if( !$installer->update($package['dir']) ){
+              $this->out(' - Error Installing Update');
+              $this->outStatus(400, 'Error Installing Update');
+              JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
+              return false;
+            }
+
+          // Success
+            $this->out(' - Update Success');
+            JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
+
+        }
+
+      // No Type
         else {
-          $this->out(' - Update Success');
-          $result = true;
+
+          $this->out('Invalid Package');
+          $this->outStatus(400, 'Invalid Package');
+          JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
+          return false;
+
         }
 
-      // Cleanup the install files
-        $this->out(' - Cleanup');
-        JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
 
       // Complete
-        return $result;
+        return $success ?: false;
+
+    }
+
+    /**
+     * [doFinalizeCoreUpgrade description]
+     * @return [type] [description]
+     */
+    public function doFinalizeCoreUpgrade(){
+
+      // Process Database Updates
+        $this->out('Processing Manifest Updates');
+        require_once JPATH_BASE . '/administrator/components/com_joomlaupdate/models/default.php';
+        $model = new JoomlaupdateModelDefault();
+        try {
+          if (!$model->finaliseUpgrade()) {
+            $error_msg = JInstaller::getInstance()->getError();
+            $this->out('- Error: Manifest ' . $error_msg);
+            $this->outStatus(400, 'Manifest ' . $error_msg);
+            return false;
+          }
+        } catch (Exception $e) {
+          $this->out('- Error: ' . $e->getMessage());
+          $this->outStatus(400, $e->getMessage());
+          return false;
+        }
+        $this->out('- Manifest Updates Complete');
 
     }
 
@@ -537,6 +674,17 @@
     }
 
     /**
+     * [outStatus description]
+     * @param  [type] $status  [description]
+     * @param  [type] $message [description]
+     * @return [type]          [description]
+     */
+    public function outStatus( $status, $message ){
+      $this->__outputBuffer['status']  = $status;
+      $this->__outputBuffer['message'] = $message;
+    }
+
+    /**
      * [doExecute description]
      * @return [type] [description]
      */
@@ -548,6 +696,10 @@
 
       if( $this->input->get('p', $this->input->get('purge')) ){
         $this->doPurgeUpdatesCache();
+      }
+
+      if( $this->input->get('finalize-core-upgrade') ){
+        $this->doFinalizeCoreUpgrade();
       }
 
       if( $this->input->get('f', $this->input->get('fetch')) ){
